@@ -1,0 +1,343 @@
+---
+title: "Covid outbreak"
+author: "Johan"
+date: "5/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages("janitor")
+
+library(readxl)
+library(janitor)
+library(tidyverse)
+library(ggplot2)
+
+
+read_excel_allsheets <- function(filename, tibble = FALSE) {
+    # I prefer straight data.frames
+    # but if you like tidyverse tibbles (the default with read_excel)
+    # then just pass tibble = TRUE
+    sheets <- readxl::excel_sheets(filename)
+    x <- lapply(sheets, function(X) readxl::read_excel(filename, sheet = X))
+    if(!tibble) x <- lapply(x, as.data.frame)
+    names(x) <- sheets
+    x
+}
+
+
+```
+
+## Excess of death and cause 
+
+
+  I have only included the output of the results but you can find the R script that I made to generate this file. It can be found here. 
+
+
+```{r , include=FALSE}
+stmf <- readr::read_csv("https://www.mortality.org/Public/STMF/Outputs/stmf.csv", skip=1)
+
+stmf = stmf[,1:10]
+
+
+deaths <- stmf %>%
+  janitor::clean_names() %>%
+  gather(key = age, value = deaths,-country_code, -year, -week, -sex)%>%
+  filter( sex == "b") %>% 
+  mutate(
+    country = recode(country_code,
+      AUT = "Austria",
+      BEL = "Belgium",
+      DEUTNP = "Germany",
+      DNK = "Denmark",
+      ESP = "Spain",
+      FIN = "Finland",
+      GBRTENW = "England & Wales",
+      ISL = "Iceland",
+      NLD = "Netherlands",
+      NOR = "Norway",
+      PRT = "Portugal",
+      SWE = "Sweden",
+      USA = "United States")
+  ) %>% 
+  mutate(
+    age = recode(age,
+      d0_14 = "0-14 years",
+      d15_64 = "15-64 years",
+      d65_74 = "65-74 years",
+      d75_84 = "75-84 years",
+      d85p = "85+",
+      d_total = "All")
+  )  %>%
+  select(year, week, country, deaths,age)
+deaths <- deaths %>%
+  group_by(country, year,age) %>%
+  filter(!(year==2020 & week==max(week))) %>%
+  select(year, week, country, age,deaths)
+
+
+
+
+
+```
+
+
+```{r adding deathstatitstics from Syria, include=FALSE}
+SyriaOriginal <- read.csv("https://query.data.world/s/cpvjrlwe4oqdbm3b2ejvxtl5r4mzh6", header=TRUE, stringsAsFactors=FALSE);
+
+SyriaFiltered = SyriaOriginal %>% filter(status == "Civilian") %>% separate( col = gender ,into = c("Age2", "Gender"), sep = " - " ) %>% select(Age2, Gender, deathdate)
+SyriaFiltered$week = as.numeric(strftime(SyriaFiltered$deathdate, format = "%V"))
+SyriaFiltered$year = as.numeric(strftime(SyriaFiltered$deathdate, format = "%Y"))
+SyriaFiltered$country =  "Syria"
+
+
+# Data  adapted from https://www.statista.com/statistics/326601/age-structure-in-syria/
+# There is only information about 65+ so I distributed the to 3 percent 65-74, 1 percent 75-84 and last 0.5 percent 85+
+AgeDistribution = data.frame(age  = c("0-14 years","15-64 years", "65-74 years","75-84 years","85+"), frequency= c(0.3142, 0.6408,0.03,0.01,0.005))
+
+SyriaFilteredAdult= SyriaFiltered %>% filter(Age2 == "Adult")
+adult = AgeDistribution %>% filter(age != ("0-14 years")) %>% mutate(adultFreq = frequency/sum(frequency)) 
+set.seed(111)
+SyriaFilteredAdult = SyriaFilteredAdult %>% 
+  mutate(age = sample(x =adult$age, size = nrow(SyriaFilteredAdult), replace = T, prob = adult$adultFreq)) %>% 
+  group_by(country, year, week, age) %>% 
+  summarise(deaths = n())
+
+SyriaFilteredChild = SyriaFiltered %>% filter(Age2 != "Adult") %>% mutate(age= "0-14 years") %>% 
+  group_by(country, year, week, age) %>% 
+  summarise(deaths = n())
+
+Syria = rbind(SyriaFilteredChild,SyriaFilteredAdult) %>% select(year, week, country, age,deaths)
+SyriaAll = Syria %>%
+  group_by(year,week,country) %>%
+  summarise(age = "All", deaths = sum(deaths) )
+
+SyriaDeaths = rbind(Syria,SyriaAll)
+
+
+
+```
+
+
+```{r adding FHM Covid 19 report for sweden, include=FALSE}
+
+
+
+
+destfile = "Folkhalsomyndigheten_Covid19_2.xlsx"
+curl::curl_download("https://www.arcgis.com/sharing/rest/content/items/b5e7488e117749c19881cce45db13f7e/data", destfile = destfile)
+FHMdata = read_excel_allsheets(filename = destfile)
+
+
+#Get reported cases per day
+CasesPerDay = FHMdata[[1]]
+CasesPerDay = CasesPerDay[(1:nrow(CasesPerDay)-1), ]
+
+
+#Get reported deaths per day
+CovidDeaths= FHMdata[[2]]
+CovidDeaths = CovidDeaths[(1:nrow(CovidDeaths)-1), ]
+
+# For some reason that I dont understand the dates get wrong in the puling from excel and not in the other case. Not spending time on this but just copying for one to the other. 
+CovidDeaths$Datum_avliden = CasesPerDay$Statistikdatum[(nrow(CasesPerDay)-nrow(CovidDeaths)+1):nrow(CasesPerDay)]
+CovidDeaths$week = as.numeric(strftime(CovidDeaths$Datum_avliden, format = "%V"))
+CovidDeaths$year = 2020
+
+CovidDeathsPerWeek = CovidDeaths %>% group_by(year,week) %>% summarise(deaths = sum(Antal_avlidna))
+
+
+# removing last week since it is uncertain
+CovidDeathsPerWeek = CovidDeathsPerWeek[(1:nrow(CovidDeathsPerWeek)-1), ]
+CovidDeathsPerWeek$excess = CovidDeathsPerWeek$deaths
+
+CovidDeathsPerWeek$country = "Sweden"
+CovidDeathsPerWeek$median_deaths = 0
+CovidDeathsPerWeek$age = "All"
+
+CovidDeathsPerWeek = CovidDeathsPerWeek %>% select(year,week,country, age, deaths, median_deaths,excess )
+
+
+
+```
+
+
+```{r merging the data, include=FALSE }
+
+
+
+
+
+recent_deaths <- deaths %>%
+  filter(year >= 2011 & year <= 2019) %>%
+  group_by(country,week,age) %>%
+  summarise(median_deaths = median(deaths)) %>%
+  ungroup()
+excess_deaths <- deaths %>%
+  filter(year >= 2011) %>%
+  left_join(recent_deaths) %>%
+  mutate(excess = deaths - median_deaths)
+
+
+
+war_deaths <- Syria %>%
+  filter(year >= 2011 & year <= 2019) %>%
+  group_by(country,week,age) %>%
+  summarise(median_deaths = sum(deaths)) %>%
+  ungroup()
+
+excess_deaths_Syria <- Syria %>%
+   filter(year >= 2011) %>%
+  left_join(war_deaths) %>%
+  mutate(excess = deaths )
+
+
+
+SummaryWarSyriah = war_deaths %>% mutate(year = 2020,deaths = median_deaths,excess = median_deaths) %>% select(year, week, country, age,deaths, median_deaths,excess)
+
+SummaryWarSyriah$reason = "War"
+excess_deaths_Syria$reason = "War"
+CovidDeathsPerWeek$reason = "Covid-19"
+excess_deaths$reason = "Everything"
+
+
+```
+
+
+
+```{r merge all the datasets to compare them, include=FALSE }
+
+excess_deaths = rbind(excess_deaths,excess_deaths_Syria)
+excess_deaths = rbind(data.frame(excess_deaths),SummaryWarSyriah)
+excess_deaths = rbind(data.frame(excess_deaths),data.frame(CovidDeathsPerWeek))
+excess_deaths = excess_deaths %>% mutate(ageShort = recode(age,
+                                                               "65-74 years" = "65+ years",
+                                                               "75-84 years" = "65+ years",
+                                                               "85+" = "65+ years")) 
+excess_deaths2  =  excess_deaths %>% 
+  group_by(year,week,country,ageShort,reason) %>%
+  summarize(excess = sum(excess), nr = n()) %>% rename("age" = ageShort)
+
+
+
+unique(excess_deaths2$country)
+
+```
+
+
+
+
+
+```{r visualize the data, include=FALSE}
+excess_deaths_Final  = excess_deaths2%>% filter( country != "United States" ) 
+thisYearData = excess_deaths_Final %>% filter( year == 2020 ) 
+
+ExcessDeathPlot = excess_deaths_Final %>% filter(age == "All")%>% filter(reason == "Everything") %>%
+  mutate(thisyear = (year == 2020)) %>%
+  ggplot(aes(x=week, y=excess, group=year)) +
+  geom_hline(yintercept=0, col='gray') +
+  geom_line(aes(col=thisyear, linetype = reason)) +
+  facet_wrap(~ country, scales='free_y') +
+  scale_color_manual(values=c("FALSE"='gray',"TRUE"='red', "d0_14" = 'yellow',"d15_64" = 'blue',"d65_74"='orange',"d75_84"='green',"d85p" = "black")) +
+  ggtitle("Weekly excess deaths")
+
+
+SeperateByAge = thisYearData %>% filter( week < 52)%>%
+  ggplot(aes(x=week, y=excess,color = reason)) +
+  geom_line() +
+  facet_grid(age ~country, scales='free_y') +
+  ggtitle("Weekly excess deaths")
+
+
+SeperateByAgeNordic = thisYearData %>% filter( week < 52) %>%
+  filter( country %in% c("Sweden","Norway","Denmark", "Syria")) %>%
+  ggplot(aes(x=week, y=excess,color = reason)) +
+  geom_line() + 
+  facet_grid(age ~country) +
+  ggtitle("Weekly excess deaths in 2020 compared to average of past 8 years")
+
+
+
+
+countryPlots = list()
+for (coun in unique(excess_deaths_Final$country)){
+  countryPlots[[coun]] = excess_deaths_Final %>% filter(country == coun & week < 25)%>%
+  mutate(thisyear = (year == 2020)) %>%
+  ggplot(aes(x=week, y=excess, group=year)) +
+  geom_hline(yintercept=0, col='gray') +
+  geom_line(aes(col=thisyear)) +
+  facet_wrap(~ age, scales='free_y') +
+  scale_color_manual(values=c("FALSE"='gray',"TRUE"='red')) +
+  guides(col=FALSE) +
+  ggtitle(paste("Number of excess death per week in", coun, "\nto average excess deathrate for the last eight years")
+)
+}
+
+agePlots = list()
+for (AGE in unique(excess_deaths_Final$age)){
+  agePlots[[AGE]] = excess_deaths_Final %>% filter(age == AGE & week < 25)%>%
+  mutate(thisyear = (year == 2020)) %>%
+  ggplot(aes(x=week, y=excess, group=year)) +
+  geom_hline(yintercept=0, col='gray') +
+  geom_line(aes(col=thisyear)) +
+  facet_wrap(~ country, scales='free_y') +
+  scale_color_manual(values=c("FALSE"='gray',"TRUE"='red')) +
+  guides(col=FALSE) +
+  ggtitle(paste("Number of excess death per week in age group", AGE, "\nto average excess deathrate for the last eight years")
+)
+}
+```
+
+
+
+```{r Plot excess death over time }
+
+ExcessDeathPlot
+
+
+
+
+```
+
+### Death seperated by age, cause and country in Europe 
+
+This is given in one plot. It is quite big. I recomend looking at the pdf available here() 
+```{r This year divided into age groups and cause of death Europe} 
+
+SeperateByAge
+ggsave("../figures/ExcessDeath_Europe.pdf", width = 15, height = 10)
+
+```
+
+
+### Death seperated by age, cause and country in Nordic countries 
+
+
+This is the same plot with only the nordic countries and relating to the sum of deats caused in Syria over the last 9 years. I think it gives some perspective. The red line is based on the reported deaths from the FHM. The blue line is based on a database maintained by the Violations Documentation Center in Syria. Data can be found here 
+( https://data.world/polymathic/casualties-of-the-syrian-civil-war/workspace/file?filename=VDC_Syria_CASREP.csv)
+
+
+
+```{r This year divided into age groups and cause of death Nordic}
+
+SeperateByAgeNordic 
+
+```
+
+## Plot excess of death in different countries
+
+
+```{r countryPlots}
+
+countryPlots
+```
+
+## Plot excess of death in different age categories
+
+```{r agePlots}
+
+agePlots
+```
+
+
