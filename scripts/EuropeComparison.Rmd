@@ -1,5 +1,5 @@
 ---
-title: "Covid outbreak"
+title: "Excess death analysis"
 author: "Johan"
 date: "5/25/2020"
 output: html_document
@@ -294,6 +294,7 @@ for (AGE in unique(excess_deaths_Final$age)){
 ```{r Plot excess death over time }
 
 ExcessDeathPlot
+
 
 
 
