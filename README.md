@@ -11,13 +11,13 @@
  
  1. Deathrates per week in different countries. Downloaded from *The Human Mortality Database*
  2. Deathrates per day in Sweden from FHM
- 3. Deaths reported of civilians in Syria during the war from 2011.
+ 3. Deaths reported of civilians in Syria during the war based on a database maintained by the Violations Documentation Center in Syria.
 
-Right now it is only one script that looks at deaths rates per week over the last years. Script is adapted from 
+Right now it is only one script that looks at deaths rates per week over the last years. Script is adapted from https://robjhyndman.com/hyndsight/excess-deaths/. Thanks for the great post!
 
  ### Comparisons
  
- I have split up the data in contries, age and reason of death. Since all these factors play a big role in death rate in the different subgroups.
+ I have split up the data in countries, age and reason of death. Since all these factors play a big role in death rate in the different subgroups.
  
  
 Feel free to copy and share the code if you want to.
